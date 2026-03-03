@@ -1,0 +1,38 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 1e371259c0ec6e112aa3d0ad6cf6a2d7697bd49a..0d9450ce3e68ea71a2d698dc19a8092b88382bc3 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -298,12 +298,12 @@ function toJson(json) {
+ }
+ const parsePgBytes = (x) => {
+ 	const hexString = x.slice(2);
+-	return Uint8Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
++	return Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
+ };
+ function normalizeByteaArray(x) {
+ 	return (0, postgres_array.parse)(x).map((x$1) => {
+ 		const hexString = x$1.slice(2);
+-		return Uint8Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
++		return Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
+ 	});
+ }
+ /**
+diff --git a/dist/index.mjs b/dist/index.mjs
+index b2e810c9ed115b44cf59dcdf616dd30376714de0..93391e1821e587baa643af30f5adb0718bde1e64 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -271,12 +271,12 @@ function toJson(json) {
+ }
+ const parsePgBytes = (x) => {
+ 	const hexString = x.slice(2);
+-	return Uint8Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
++	return Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
+ };
+ function normalizeByteaArray(x) {
+ 	return parse(x).map((x$1) => {
+ 		const hexString = x$1.slice(2);
+-		return Uint8Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
++		return Array.from({ length: hexString.length / 2 }, (_, idx) => Number.parseInt(hexString.substring(idx * 2, (idx + 1) * 2), 16));
+ 	});
+ }
+ /**

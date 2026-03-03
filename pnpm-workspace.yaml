@@ -1,2 +1,5 @@
 packages:
-  - 'packages/*'
+  - packages/*
+
+patchedDependencies:
+  pglite-prisma-adapter@0.7.2: patches/pglite-prisma-adapter@0.7.2.patch
