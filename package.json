@@ -6,10 +6,5 @@
         "release": "node ./scripts/release.cjs",
         "web": "pnpm -F happy-app web"
     },
-    "packageManager": "pnpm@10.9.0",
-    "resolutions": {
-        "whatwg-url": "14.2.0",
-        "parse-path": "7.0.3",
-        "@types/parse-path": "7.0.3"
-    }
+    "packageManager": "pnpm@10.9.0"
 }
