@@ -2,28 +2,14 @@
     "name": "monorepo",
     "private": true,
     "scripts": {
-        "cli": "yarn workspace happy-coder cli",
+        "cli": "pnpm -F happy-coder cli",
         "release": "node ./scripts/release.cjs",
-        "web": "yarn workspace happy-app web",
-        "postinstall": "node ./scripts/postinstall.cjs"
+        "web": "pnpm -F happy-app web"
     },
-    "workspaces": {
-        "packages": [
-            "packages/happy-app",
-            "packages/happy-agent",
-            "packages/happy-cli",
-            "packages/happy-server",
-            "packages/happy-wire"
-        ],
-        "nohoist": [
-            "**/zod",
-            "**/react",
-            "**/react-dom",
-            "**/react-native",
-            "**/react-native/**",
-            "**/react-native-edge-to-edge/**",
-            "**/react-native-incall-manager/**"
-        ]
-    },
-    "packageManager": "yarn@1.22.22"
+    "packageManager": "pnpm@10.9.0",
+    "resolutions": {
+        "whatwg-url": "14.2.0",
+        "parse-path": "7.0.3",
+        "@types/parse-path": "7.0.3"
+    }
 }
