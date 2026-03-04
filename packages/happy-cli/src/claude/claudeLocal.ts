@@ -379,9 +379,9 @@ export async function claudeLocal(opts: {
                         r();
                     } else if (signal) {
                         reject(new Error(`Process terminated with signal: ${signal}`));
-                    } else if (code !== 0 && code !== null) {
-                        // Non-zero exit code - propagate it
-                        reject(new ExitCodeError(code));
+                    // } else if (code !== 0 && code !== null) {
+                    //     // Non-zero exit code - propagate it
+                    //     reject(new ExitCodeError(code));
                     } else {
                         r();
                     }
