@@ -1,0 +1,17 @@
+services:
+  webapp:
+    image: happy-webapp
+    ports:
+      - "8081:8081"
+    environment:
+      EXPO_PUBLIC_HAPPY_SERVER_URL: http://server:3005
+    depends_on:
+      - server
+  server:
+    image: happy-server 
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./data:/data/
+    environment:
+      FLASK_RUN_PORT: 8000

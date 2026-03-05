@@ -1,97 +1,45 @@
+# syntax=docker/dockerfile:1
+
+FROM node:20 AS base
+
+RUN npm install --global pnpm
+
+RUN sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources
+
+# Install dependencies
+RUN apt-get update && apt-get install -y python3 ffmpeg make g++ build-essential && rm -rf /var/lib/apt/lists/*
+
 # Stage 1: install dependencies with workspace context
-FROM node:20-alpine AS deps
+FROM base AS builder
 
 WORKDIR /repo
 
-COPY package.json yarn.lock ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY scripts ./scripts
+COPY patches ./patches
 
-RUN mkdir -p packages/happy-app packages/happy-server packages/happy-cli packages/happy-wire
+COPY packages/ packages/
 
-COPY packages/happy-app/package.json packages/happy-app/
-COPY packages/happy-server/package.json packages/happy-server/
-COPY packages/happy-cli/package.json packages/happy-cli/
-COPY packages/happy-wire/package.json packages/happy-wire/
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+  pnpm --filter happy-app deploy /app/
 
-# Workspace postinstall requirements
-COPY packages/happy-app/patches packages/happy-app/patches
-COPY packages/happy-server/prisma packages/happy-server/prisma
-COPY packages/happy-cli/scripts packages/happy-cli/scripts
-COPY packages/happy-cli/tools packages/happy-cli/tools
+# Stage 3: runtime
+FROM base AS runner
 
-RUN SKIP_HAPPY_WIRE_BUILD=1 yarn install --frozen-lockfile --ignore-engines
+WORKDIR /app
 
-# Stage 2: build the web app
-FROM deps AS builder
-
-ARG POSTHOG_API_KEY=""
-ARG REVENUE_CAT_STRIPE=""
-
+# Set environment to production
 ENV NODE_ENV=production
-ENV APP_ENV=production
-ENV EXPO_PUBLIC_POSTHOG_API_KEY=$POSTHOG_API_KEY
-ENV EXPO_PUBLIC_REVENUE_CAT_STRIPE=$REVENUE_CAT_STRIPE
 
-COPY packages/happy-wire ./packages/happy-wire
-COPY packages/happy-app ./packages/happy-app
+# Copy necessary files from the builder stage
+COPY --from=builder /app /app
 
-RUN yarn workspace @slopus/happy-wire build
-RUN yarn workspace happy-app expo export --platform web --output-dir dist
+ENV DATA_DIR=/data
+ENV PGLITE_DIR=/data/pglite
 
-# Stage 3: runtime with Nginx
-FROM nginx:alpine AS runner
+VOLUME /data
 
-COPY --from=builder /repo/packages/happy-app/dist /usr/share/nginx/html
+EXPOSE 8081
 
-# Remove default nginx configuration
-RUN rm /etc/nginx/conf.d/default.conf
-
-# Create custom nginx configuration directly in the Dockerfile
-RUN echo 'server { \
-    listen 80; \
-    \
-    location /_expo/ { \
-        root   /usr/share/nginx/html; \
-        try_files $uri =404; \
-    } \
-    \
-    location /assets/ { \
-        root   /usr/share/nginx/html; \
-        try_files $uri =404; \
-    } \
-    \
-    location /.well-known/ { \
-        root   /usr/share/nginx/html; \
-        try_files $uri =404; \
-    } \
-    \
-    location / { \
-        root   /usr/share/nginx/html; \
-        index  index.html index.htm; \
-        try_files $uri $uri.html $uri/index.html $uri/index.htm $uri/ /index.html /index.htm =404; \
-    } \
-    \
-    error_page 500 502 503 504 /50x.html; \
-    location = /50x.html { \
-        root /usr/share/nginx/html; \
-        try_files $uri @redirect_to_index; \
-        internal; \
-    } \
-    \
-    error_page 404 = @handle_404; \
-    \
-    location @handle_404 { \
-        root /usr/share/nginx/html; \
-        try_files /404.html @redirect_to_index; \
-        internal; \
-    } \
-    \
-    location @redirect_to_index { \
-        return 302 /; \
-    } \
-}' > /etc/nginx/conf.d/default.conf
-
-# Expose the standard nginx port
-EXPOSE 80
-
-# Nginx starts automatically in the foreground with CMD ["nginx", "-g", "daemon off;"]
+# Command to run the application
+ENTRYPOINT ["/bin/bash", "-c", "pnpm run web"]

@@ -6,6 +6,7 @@ import { createLarkLogger, getLarkLoggerLevel } from "./logger.mjs"
  * @typedef {Object} LarkConfig
  * @property {string} appId
  * @property {string} appSecret
+ * @property {string} [domain]
  * @property {string} [docToken]
  */
 
@@ -24,9 +25,22 @@ export class LarkClient {
   constructor(config, logger) {
     this.#config = config
     this.#logger = logger
+
+    /** @type {lark.Domain|string} */
+    let domain = lark.Domain.Feishu;
+    if (config.domain) {
+      if ("feishu" === config.domain.toLowerCase()) {
+        domain = lark.Domain.Feishu;
+      } else if ("lark" === config.domain.toLowerCase()) {
+        domain = lark.Domain.Lark;
+      } else {
+        domain = config.domain;
+      }
+    }
     this.#sdk = new lark.Client({
       appId: config.appId,
       appSecret: config.appSecret,
+      domain: domain,
       logger: createLarkLogger("lark-sdk"),
       loggerLevel: getLarkLoggerLevel(),
     })
@@ -34,7 +48,8 @@ export class LarkClient {
 
   async replyText(messageId, text) {
     try {
-      this.#logger.withMetadata({ messageId, textLength: text.length }).debug("Replying text")
+      this.#logger.withMetadata({ messageId, textLength: text.length }).debug("Replying text");
+
       const resp = await this.#sdk.im.message.reply({
         path: { message_id: messageId },
         data: {

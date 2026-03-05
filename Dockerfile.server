@@ -20,7 +20,8 @@ COPY patches ./patches
 
 COPY packages/ packages/
 
-RUN pnpm --filter happy-server deploy /app/
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+  pnpm --filter happy-server deploy /app/
 
 # Stage 3: runtime
 FROM base AS runner
@@ -32,9 +33,6 @@ ENV NODE_ENV=production
 
 # Copy necessary files from the builder stage
 COPY --from=builder /app /app
-
-# Expose the port the app will run on
-EXPOSE 3000
 
 ENV HANDY_MASTER_SECRET=HANDY_MASTER_SECRET
 

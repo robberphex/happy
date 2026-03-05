@@ -652,6 +652,9 @@ importers:
       '@fastify/autoload':
         specifier: ^6.0.0
         version: 6.3.1
+      '@fastify/cors':
+        specifier: ^10.1.0
+        version: 10.1.0
       '@fastify/sensible':
         specifier: ^6.0.0
         version: 6.0.4
@@ -661,6 +664,9 @@ importers:
       '@loglayer/transport-simple-pretty-terminal':
         specifier: ^3.0.2
         version: 3.0.2
+      axios:
+        specifier: ^1.13.6
+        version: 1.13.6
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
@@ -679,6 +685,9 @@ importers:
       serialize-error:
         specifier: ^13.0.1
         version: 13.0.1
+      tweetnacl:
+        specifier: ^1.0.3
+        version: 1.0.3
       zod:
         specifier: 3.25.76
         version: 3.25.76
