@@ -1,0 +1,172 @@
+export function truncate(text, maxLen) {
+  if (text.length <= maxLen) {
+    return text
+  }
+  return `${text.slice(0, maxLen)}...`
+}
+
+export function buildMarkdownCard(content, icon) {
+  const element = { tag: "markdown", content }
+  if (icon) {
+    element.icon = { tag: "standard_icon", ...icon }
+  }
+  return {
+    schema: "2.0",
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
+    body: {
+      elements: [element],
+    },
+  }
+}
+
+export function escapeLarkMd(text) {
+  return text.replace(/</g, "＜").replace(/>/g, "＞").replace(/\*/g, "﹡").replace(/~/g, "∼")
+}
+
+export function buildSelectedCard(text) {
+  return {
+    schema: "2.0",
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
+    body: {
+      elements: [{ tag: "markdown", content: text }],
+    },
+  }
+}
+
+/**
+ * @typedef {Object} ListItem
+ * @property {string} label
+ * @property {string} [description]
+ * @property {boolean} [isCurrent]
+ * @property {{token: string, color?: string}} icon
+ * @property {string} time
+ * @property {Record<string, unknown>} callbackValue
+ */
+
+/**
+ * @typedef {Object} ListCardOptions
+ * @property {string} [title]
+ * @property {string} [borderColor]
+ */
+
+export function buildListCard(items, options) {
+  const borderColor = options?.borderColor ?? "grey"
+
+  const interactiveContainers = items.map((item) => ({
+    tag: "interactive_container",
+    width: "fill",
+    height: "auto",
+    horizontal_align: "left",
+    background_style: "default",
+    has_border: true,
+    border_color: borderColor,
+    corner_radius: "8px",
+    padding: "4px 12px 4px 12px",
+    vertical_spacing: item.description ? "0px" : undefined,
+    behaviors: [{ type: "callback", value: item.callbackValue }],
+    elements: [
+      {
+        tag: "column_set",
+        flex_mode: "flow",
+        background_style: "default",
+        columns: [
+          {
+            tag: "column",
+            width: "weighted",
+            weight: 1,
+            vertical_align: "center",
+            elements: [
+              {
+                tag: "markdown",
+                content: item.label,
+                icon: { tag: "standard_icon", ...item.icon },
+              },
+            ],
+          },
+          ...(item.isCurrent
+            ? [
+                {
+                  tag: "column",
+                  width: "auto",
+                  weight: 1,
+                  vertical_align: "center",
+                  elements: [
+                    {
+                      tag: "markdown",
+                      content: "<font color='grey'>current</font>",
+                      text_size: "notation",
+                    },
+                  ],
+                },
+              ]
+            : []),
+          {
+            tag: "column",
+            width: "auto",
+            weight: 1,
+            vertical_align: "center",
+            elements: [
+              {
+                tag: "markdown",
+                content: `<font color='grey'>${item.time}</font>`,
+                text_size: "notation",
+              },
+            ],
+          },
+        ],
+      },
+      ...(item.description
+        ? [
+            {
+              tag: "markdown",
+              content: `<font color='grey'>${item.description}</font>`,
+              text_size: "notation",
+              margin: "0px 0px 0px 24px",
+            },
+          ]
+        : []),
+    ],
+  }))
+
+  const card = {
+    schema: "2.0",
+    config: {
+      wide_screen_mode: true,
+      update_multi: true,
+    },
+    body: {
+      elements: [
+        {
+          tag: "column_set",
+          flex_mode: "none",
+          background_style: "default",
+          columns: [
+            {
+              tag: "column",
+              width: "weighted",
+              weight: 1,
+              vertical_align: "top",
+              vertical_spacing: "8px",
+              elements: interactiveContainers,
+            },
+          ],
+        },
+      ],
+    },
+  }
+
+  if (options?.title) {
+    card.header = {
+      title: { tag: "plain_text", content: options.title },
+      template: "indigo",
+    }
+  }
+
+  return card
+}
