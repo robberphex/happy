@@ -54,9 +54,9 @@ class HappyWebSocket {
             this.#handleUpdate(data);
         });
 
-        this.#socket.onAny((event, data) => {
-            console.log('🔌 HappyWebSocket: Received event:', event, JSON.stringify(data, null, 2));
-        });
+        // this.#socket.onAny((event, data) => {
+        //     console.log('🔌 HappyWebSocket: Received event:', event, JSON.stringify(data, null, 2));
+        // });
     }
 
     disconnect() {
@@ -81,12 +81,13 @@ class HappyWebSocket {
 
             if (body.t === 'new-message') {
                 this.#logDecryptedMessage(body);
-            }
+            } else {
 
-            console.log('🔌 HappyWebSocket: ===== Received update =====');
-            console.log('🔌 HappyWebSocket: Type:', body.t);
-            console.log('🔌 HappyWebSocket: Full payload:', JSON.stringify(body, null, 2));
-            console.log('🔌 HappyWebSocket: ============================');
+                console.log('🔌 HappyWebSocket: ===== Received update =====');
+                console.log('🔌 HappyWebSocket: Type:', body.t);
+                console.log('🔌 HappyWebSocket: Full payload:', JSON.stringify(body, null, 2));
+                console.log('🔌 HappyWebSocket: ============================');
+            }
         } catch (error) {
             console.error('🔌 HappyWebSocket: Error handling update:', error);
         }

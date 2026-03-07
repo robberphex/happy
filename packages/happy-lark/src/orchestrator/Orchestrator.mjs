@@ -2,6 +2,7 @@ import { LarkClient } from "../lark/client.mjs"
 import { HappyClient } from "../happy/HappyClient.mjs"
 import { HappyEncryption } from "../happy/HappyEncryption.mjs"
 import { HappyWebSocket } from "../happy/HappyWebSocket.mjs"
+import { buildSessionListCard } from "../lark/cards/index.mjs"
 import { AuthCacheService } from "./AuthCacheService.mjs"
 import { MessageDedupeService } from "./MessageDedupeService.mjs"
 import fastify from "fastify";
@@ -68,6 +69,17 @@ export class Orchestrator {
     });
     app.get('/', function (request, reply) {
       reply.send('Welcome to Happy Lark!');
+    });
+    app.post('/callback/happy-lark/lark/callback', async (request, reply) => {
+      const body = request.body || {};
+      const eventType = body?.header?.event_type || body?.type;
+
+      if (eventType === 'url_verification') {
+        return { challenge: body?.challenge };
+      }
+
+      console.log('Lark callback body:', JSON.stringify(body, null, 2));
+      return { ok: true };
     });
     app.post('/callback/happy-lark/lark/event', async (request, reply) => {
       console.debug(JSON.stringify(request.body));
@@ -293,8 +305,6 @@ export class Orchestrator {
       const { secret, token } = auth;
       const encryption = await HappyEncryption.create(secret);
 
-      await this.#larkClient.replyText(message.messageId, '正在获取 Session 列表...');
-
       const sessions = await this.#happyClient.fetchSessions(token, encryption);
       console.log('fetchSessions result:', JSON.stringify(sessions, null, 2));
       const sessions2a = await this.#happyClient.fetchActiveSessions(token, encryption);
@@ -305,26 +315,29 @@ export class Orchestrator {
         return;
       }
 
-      const sessionList = sessions.map((s) => {
+      const descriptions = new Map();
+      const cardSessions = sessions.map((s) => {
         const metadata = s.metadata || {};
         const tools = metadata.tools || [];
         const slashCommands = metadata.slashCommands || [];
-        
-        return `### 会话 \`${s.id}\`
-- **状态**: ${metadata.lifecycleState || 'N/A'} (${s.active ? '活跃' : '非活跃'})
-- **主机**: ${metadata.host || 'N/A'} (${metadata.os || 'N/A'})
-- **版本**: ${metadata.version || 'N/A'}
-- **启动**: ${metadata.startedBy || 'N/A'} (PID: ${metadata.hostPid || 'N/A'})
-- **工作目录**: ${metadata.path || 'N/A'}
-- **运行时长**: ${s.createdAt ? Math.round((Date.now() - s.createdAt) / 1000 / 60) + ' 分钟' : 'N/A'}
-- **工具 (${tools.length})**: ${tools.slice(0, 5).join(', ')}${tools.length > 5 ? '...' : ''}
-- **命令 (${slashCommands.length})**: ${slashCommands.slice(0, 5).join(', ')}${slashCommands.length > 5 ? '...' : ''}`;
-      }).join('\n\n');
+        descriptions.set(
+          s.id,
+          `${metadata.host || "N/A"} · ${metadata.path || "N/A"} · tools:${tools.length} · cmds:${slashCommands.length}`
+        );
 
-      await this.#larkClient.replyMarkdownCard(
-        message.messageId,
-        `## Session 列表 (${sessions.length})\n\n${sessionList}`
-      );
+        return {
+          id: s.id,
+          updatedAt: s.updatedAt,
+          initialPrompt: metadata.path || metadata.host || s.id,
+        };
+      });
+
+      const card = buildSessionListCard({
+        sessions: cardSessions,
+        title: `Session 列表 (${sessions.length})`,
+        descriptions,
+      });
+      await this.#larkClient.replyCard(message.messageId, card);
     } catch (error) {
       console.log("error_error", error);
       const errMsg = error instanceof Error ? error.message : String(error);
