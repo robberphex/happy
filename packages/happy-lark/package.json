@@ -10,7 +10,9 @@
   "scripts": {
     "test": "node --test test/**/*.test.js",
     "start": "fastify start -l info app.mjs",
-    "dev": "fastify start -w -l info -P app.mjs"
+    "dev": "fastify start -w -l info -P app.mjs",
+    "migrate": "dotenv -e .env.dev -- prisma migrate --name init",
+    "migrate:reset": "dotenv -e .env.dev -- prisma migrate reset"
   },
   "keywords": [],
   "author": "",
@@ -21,20 +23,29 @@
     "@fastify/sensible": "^6.0.0",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@loglayer/transport-simple-pretty-terminal": "^3.0.2",
+    "@prisma/adapter-mariadb": "^7.4.2",
+    "@prisma/client": "^6.19.2",
     "axios": "^1.13.6",
     "date-fns": "^4.1.0",
+    "dotenv": "^17.3.1",
     "fastify": "^5.0.0",
     "fastify-cli": "^7.4.1",
     "fastify-plugin": "^5.0.0",
     "loglayer": "^9.1.0",
+    "prisma": "^6.19.2",
+    "prisma-json-types-generator": "^3.6.2",
     "serialize-error": "^13.0.1",
+    "socket.io-client": "^4.8.3",
     "tweetnacl": "^1.0.3",
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "c8": "^10.1.2"
+    "@types/node": "^25.3.5",
+    "c8": "^10.1.2",
+    "dotenv-cli": "^8.0.0"
   },
   "bin": {
     "happy-lark": "bin/happy-lark.mjs"
-  }
+  },
+  "packageManager": "pnpm@10.9.0"
 }

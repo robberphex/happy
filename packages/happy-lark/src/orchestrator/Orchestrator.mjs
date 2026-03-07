@@ -1,6 +1,9 @@
 import { LarkClient } from "../lark/client.mjs"
 import { HappyClient } from "../happy/HappyClient.mjs"
 import { HappyEncryption } from "../happy/HappyEncryption.mjs"
+import { HappyWebSocket } from "../happy/HappyWebSocket.mjs"
+import { AuthCacheService } from "./AuthCacheService.mjs"
+import { MessageDedupeService } from "./MessageDedupeService.mjs"
 import fastify from "fastify";
 
 /**
@@ -23,6 +26,12 @@ export class Orchestrator {
   #larkClient
   /** @type {HappyClient} */
   #happyClient
+  /** @type {Map<string, { websocket: HappyWebSocket; encryption: any }>} */
+  #webSocketMap
+  /** @type {AuthCacheService} */
+  #authCacheService
+  /** @type {MessageDedupeService} */
+  #messageDedupeService
 
   /**
    * @param {LarkClient} larkClient
@@ -31,6 +40,9 @@ export class Orchestrator {
   constructor(larkClient, happyClient) {
     this.#larkClient = larkClient
     this.#happyClient = happyClient
+    this.#webSocketMap = new Map()
+    this.#authCacheService = new AuthCacheService()
+    this.#messageDedupeService = new MessageDedupeService()
   }
 
   /**
@@ -40,6 +52,9 @@ export class Orchestrator {
 
     // Configure
     console.log('Starting API...');
+
+    // Restore all WebSocket connections from cache
+    await this.#restoreAllWebSocketConnections();
 
     // Start API
     const app = fastify({
@@ -113,12 +128,60 @@ export class Orchestrator {
   }
 
   /**
+   * Restore all WebSocket connections from auth cache on startup
+   * @returns {Promise<void>}
+   */
+  async #restoreAllWebSocketConnections() {
+    try {
+      const allAuths = await this.#authCacheService.getAll();
+      console.log(`🔌 HappyWebSocket: Found ${allAuths.length} cached auths to restore`);
+
+      for (const auth of allAuths) {
+        try {
+          const encryption = await HappyEncryption.create(auth.secret);
+          await this.#happyClient.fetchActiveSessions(auth.token, encryption);
+          const websocket = new HappyWebSocket();
+          websocket.connect(auth.token, encryption, {
+            getSessionDataKey: (sessionId) => this.#happyClient.getSessionDataKey(sessionId),
+          });
+          this.#webSocketMap.set(auth.senderId, { websocket, encryption });
+          console.log(`🔌 HappyWebSocket: Restored connection for senderId: ${auth.senderId}`);
+        } catch (error) {
+          console.error(`🔌 HappyWebSocket: Failed to restore connection for ${auth.senderId}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('🔌 HappyWebSocket: Failed to restore WebSocket connections:', error);
+    }
+  }
+
+  /**
    * Handles a parsed message.
    * @param {ParsedMessage} message
    * @returns {Promise<void>}
    */
   async handleMessage(message) {
+    const isNew = await this.#messageDedupeService.tryInsert(message.messageId);
+    if (!isNew) {
+      return;
+    }
+
     console.log(message);
+
+    const trimmedText = message.text.trim();
+
+    if (trimmedText === '/sessions') {
+      const auth = await this.#authCacheService.get(message.senderId);
+      await this.#handleSessionsCommand(message, auth);
+      return;
+    }
+
+    if (trimmedText === '/machines') {
+      const auth = await this.#authCacheService.get(message.senderId);
+      await this.#handleMachinesCommand(message, auth);
+      return;
+    }
+
     const base64PubKey = this.#extractTerminalPublicKey(message.text);
     console.log("base64PubKey", base64PubKey);
     if (!base64PubKey) {
@@ -130,10 +193,17 @@ export class Orchestrator {
     }
 
     try {
-      const terminalPublicKey = this.#happyClient.decodeBase64(base64PubKey, 'base64url');
-      const secret = await this.#happyClient.getRandomBytesAsync(32);
+      let auth = await this.#authCacheService.get(message.senderId);
+      if (!auth) {
+        const secret = await this.#happyClient.getRandomBytesAsync(32);
+        const token = await this.#happyClient.authGetToken(secret);
+        auth = { secret, token };
+        await this.#authCacheService.set(message.senderId, auth);
+      }
+      const { secret, token } = auth;
       const encryption = await HappyEncryption.create(secret);
-      const token = await this.#happyClient.authGetToken(secret);
+
+      const terminalPublicKey = this.#happyClient.decodeBase64(base64PubKey, 'base64url');
 
       const answerV1 = this.#happyClient.encryptBox(secret, terminalPublicKey);
       const responseV2Bundle = new Uint8Array(encryption.contentDataKey.length + 1);
@@ -144,8 +214,24 @@ export class Orchestrator {
       const result = await this.#happyClient.authApprove(token, terminalPublicKey, answerV1, answerV2);
       await this.#larkClient.replyText(message.messageId, `终端授权结果: ${result}`);
 
-      // todo await sleep 5s
+      if (result === 'approved') {
+        console.log('🔌 HappyWebSocket: Starting WebSocket connection...');
+        const existingConnection = this.#webSocketMap.get(message.senderId);
+        if (existingConnection) {
+          existingConnection.websocket.disconnect();
+        }
+
+        await this.#happyClient.fetchActiveSessions(token, encryption);
+        const websocket = new HappyWebSocket();
+        websocket.connect(token, encryption, {
+          getSessionDataKey: (sessionId) => this.#happyClient.getSessionDataKey(sessionId),
+        });
+        this.#webSocketMap.set(message.senderId, { websocket, encryption });
+        await this.#larkClient.replyText(message.messageId, `WebSocket 连接已建立，正在监听实时消息...`);
+      }
+
       await new Promise(resolve => setTimeout(resolve, 5000));
+
       const machines = await this.#happyClient.fetchMachines(token, encryption);
       console.log(`machines(${machines.length})`);
       const preview = machines.map((machine) => ({
@@ -190,5 +276,100 @@ export class Orchestrator {
     }
 
     return null;
+  }
+
+  /**
+   * @param {ParsedMessage} message
+   * @param {{ secret: Uint8Array; token: string } | null} auth
+   * @returns {Promise<void>}
+   */
+  async #handleSessionsCommand(message, auth) {
+    try {
+      if (!auth) {
+        await this.#larkClient.replyText(message.messageId, '请先进行终端认证后再查看 Session');
+        return;
+      }
+
+      const { secret, token } = auth;
+      const encryption = await HappyEncryption.create(secret);
+
+      await this.#larkClient.replyText(message.messageId, '正在获取 Session 列表...');
+
+      const sessions = await this.#happyClient.fetchSessions(token, encryption);
+      console.log('fetchSessions result:', JSON.stringify(sessions, null, 2));
+      const sessions2a = await this.#happyClient.fetchActiveSessions(token, encryption);
+      console.log('fetchActiveSessions result:', JSON.stringify(sessions2a, null, 2));
+
+      if (sessions.length === 0) {
+        await this.#larkClient.replyText(message.messageId, '暂无 Session');
+        return;
+      }
+
+      const sessionList = sessions.map((s) => {
+        const metadata = s.metadata || {};
+        const tools = metadata.tools || [];
+        const slashCommands = metadata.slashCommands || [];
+        
+        return `### 会话 \`${s.id}\`
+- **状态**: ${metadata.lifecycleState || 'N/A'} (${s.active ? '活跃' : '非活跃'})
+- **主机**: ${metadata.host || 'N/A'} (${metadata.os || 'N/A'})
+- **版本**: ${metadata.version || 'N/A'}
+- **启动**: ${metadata.startedBy || 'N/A'} (PID: ${metadata.hostPid || 'N/A'})
+- **工作目录**: ${metadata.path || 'N/A'}
+- **运行时长**: ${s.createdAt ? Math.round((Date.now() - s.createdAt) / 1000 / 60) + ' 分钟' : 'N/A'}
+- **工具 (${tools.length})**: ${tools.slice(0, 5).join(', ')}${tools.length > 5 ? '...' : ''}
+- **命令 (${slashCommands.length})**: ${slashCommands.slice(0, 5).join(', ')}${slashCommands.length > 5 ? '...' : ''}`;
+      }).join('\n\n');
+
+      await this.#larkClient.replyMarkdownCard(
+        message.messageId,
+        `## Session 列表 (${sessions.length})\n\n${sessionList}`
+      );
+    } catch (error) {
+      console.log("error_error", error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      await this.#larkClient.replyText(message.messageId, `获取 Session 失败: ${errMsg}`);
+    }
+  }
+
+  /**
+   * @param {ParsedMessage} message
+   * @param {{ secret: Uint8Array; token: string } | null} auth
+   * @returns {Promise<void>}
+   */
+  async #handleMachinesCommand(message, auth) {
+    try {
+      if (!auth) {
+        await this.#larkClient.replyText(message.messageId, '请先进行终端认证后再查看机器列表');
+        return;
+      }
+
+      const { secret, token } = auth;
+      const encryption = await HappyEncryption.create(secret);
+
+      await this.#larkClient.replyText(message.messageId, '正在获取机器列表...');
+
+      const machines = await this.#happyClient.fetchMachines(token, encryption);
+      console.log(`machines(${machines.length})`);
+
+      if (machines.length === 0) {
+        await this.#larkClient.replyText(message.messageId, '暂无机器');
+        return;
+      }
+
+      const header = '| ID | Name | Metadata版本 | Daemon版本 | Metadata解密 | Daemon解密 | Status |\n|---|---|---|---|---|---|---|';
+      const rows = machines.map((m) => {
+        return `| ${m.id} | ${m.metadata?.name ?? 'N/A'} | ${m.metadataVersion} | ${m.daemonStateVersion} | ${m.metadata !== null ? '✓' : '✗'} | ${m.daemonState !== null ? '✓' : '✗'} | ${m.daemonState?.status ?? 'N/A'} |`;
+      }).join('\n');
+
+      await this.#larkClient.replyMarkdownCard(
+        message.messageId,
+        `### 机器列表 (${machines.length})\n\n${header}\n${rows}`
+      );
+    } catch (error) {
+      console.log("error_error", error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      await this.#larkClient.replyText(message.messageId, `获取机器列表失败: ${errMsg}`);
+    }
   }
 }

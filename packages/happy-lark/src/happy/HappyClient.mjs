@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { randomBytes } from 'crypto';
+import { randomBytes, createDecipheriv } from 'crypto';
 import nacl from 'tweetnacl';
 
 class HappyClient {
@@ -7,6 +7,8 @@ class HappyClient {
     this.serverUrl = process.env.HAPPY_SERVER_URL || 'https://api.cluster-fluster.com';
     /** @type {Map<string, Uint8Array>} */
     this.machineDataKeys = new Map();
+    /** @type {Map<string, Uint8Array>} */
+    this.sessionDataKeys = new Map();
   }
 
   /**
@@ -144,6 +146,83 @@ class HappyClient {
   }
 
   /**
+   * Fetch active sessions for the current user.
+   * @param {string} token
+   * @param {{
+   *   decryptEncryptionKey: (encryptedKey: string) => Promise<Uint8Array | null>;
+   *   masterSecret: Uint8Array;
+   * }} encryption
+   * @returns {Promise<Array<any>>}
+   */
+  async fetchActiveSessions(token, encryption) {
+    console.log('📊 HappyClient: Fetching active sessions...');
+
+    try {
+      const response = await axios.get(`${this.serverUrl}/v2/sessions/active`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = response.data;
+      const sessions = data.sessions ?? (Array.isArray(data) ? data : []);
+      console.log(`📊 HappyClient: Fetched ${sessions.length} active sessions from server`);
+
+      return this.decryptSessions(sessions, encryption);
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        console.error(`Failed to fetch active sessions: ${status ?? 'unknown error'}`);
+      } else {
+        console.error('Failed to fetch active sessions:', error);
+      }
+      return [];
+    }
+  }
+
+  /**
+   * Fetch sessions for the current user.
+   *
+   * If `encryption` is provided, this method also decrypts session data:
+   * - decrypt session data encryption keys
+   * - decrypt metadata/agentState
+   *
+   * @param {string} token
+   * @param {{
+   *   decryptEncryptionKey: (encryptedKey: string) => Promise<Uint8Array | null>;
+   *   masterSecret: Uint8Array;
+   * }} encryption
+   * @returns {Promise<Array<any>>}
+   */
+  async fetchSessions(token, encryption) {
+    console.log('📊 HappyClient: Fetching sessions...');
+
+    try {
+      const response = await axios.get(`${this.serverUrl}/v2/sessions`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = response.data;
+      const sessions = data.sessions ?? (Array.isArray(data) ? data : []);
+      console.log(`📊 HappyClient: Fetched ${sessions.length} sessions from server`);
+
+      return this.decryptSessions(sessions, encryption);
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        console.error(`Failed to fetch sessions: ${status ?? 'unknown error'}`);
+      } else {
+        console.error('Failed to fetch sessions:', error);
+      }
+      return [];
+    }
+  }
+
+  /**
    * Fetch machine list for the current user.
    *
    * If `encryption` is provided, this method also mirrors app-side
@@ -160,10 +239,10 @@ class HappyClient {
    *     decryptMetadata: (version: number, encrypted: string) => Promise<any>;
    *     decryptDaemonState: (version: number, encrypted: string) => Promise<any>;
    *   } | null);
-   * } | null} [encryption]
+   * } | null} encryption
    * @returns {Promise<Array<any>>}
    */
-  async fetchMachines(token, encryption = null) {
+  async fetchMachines(token, encryption) {
     console.log('📊 HappyClient: Fetching machines...');
 
     try {
@@ -177,10 +256,6 @@ class HappyClient {
       const data = response.data;
       const machines = Array.isArray(data) ? data : [];
       console.log(`📊 HappyClient: Fetched ${machines.length} machines from server`);
-
-      if (!encryption) {
-        return machines;
-      }
 
       return this.#decryptMachines(machines, encryption);
     } catch (error) {
@@ -295,6 +370,187 @@ class HappyClient {
 
     console.log(`🖥️ HappyClient: fetchMachines completed - processed ${decryptedMachines.length} machines`);
     return decryptedMachines;
+  }
+
+  /**
+   * @param {Array<{
+   *   id: string;
+   *   metadata: string;
+   *   metadataVersion: number;
+   *   agentState?: string | null;
+   *   agentStateVersion?: number;
+   *   dataEncryptionKey?: string | null;
+   *   seq: number;
+   *   active: boolean;
+   *   activeAt: number;
+   *   createdAt: number;
+   *   updatedAt: number;
+   * }>} sessions
+   * @param {{
+   *   decryptEncryptionKey: (encryptedKey: string) => Promise<Uint8Array | null>;
+   *   masterSecret: Uint8Array;
+   * }} encryption
+   * @returns {Promise<Array<{
+   *   id: string;
+   *   seq: number;
+   *   createdAt: number;
+   *   updatedAt: number;
+   *   active: boolean;
+   *   activeAt: number;
+   *   metadata: any | null;
+   *   metadataVersion: number;
+   *   agentState: any | null;
+   *   agentStateVersion: number;
+   * }>>}
+   */
+  async decryptSessions(sessions, encryption) {
+    const decryptedSessions = [];
+    const masterSecret = encryption.masterSecret;
+    for (const session of sessions) {
+      try {
+        let sessionKey = null;
+        if (session.dataEncryptionKey) {
+          sessionKey = await encryption.decryptEncryptionKey(session.dataEncryptionKey);
+          if (!sessionKey) {
+            console.error(`Failed to decrypt session key for session ${session.id}`);
+          }
+        }
+        if (sessionKey) {
+          this.sessionDataKeys.set(session.id, sessionKey);
+        }
+
+        const metadata = session.metadata
+          ? this.#decryptSessionData(session.metadata, sessionKey, masterSecret)
+          : null;
+
+        const agentState = session.agentState
+          ? this.#decryptSessionData(session.agentState, sessionKey, masterSecret)
+          : null;
+
+        decryptedSessions.push({
+          id: session.id,
+          seq: session.seq,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          active: session.active,
+          activeAt: session.activeAt,
+          metadata,
+          metadataVersion: session.metadataVersion,
+          agentState,
+          agentStateVersion: session.agentStateVersion || 0
+        });
+      } catch (error) {
+        console.error(`Failed to decrypt session ${session.id}:`, error);
+        decryptedSessions.push({
+          id: session.id,
+          seq: session.seq,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          active: session.active,
+          activeAt: session.activeAt,
+          metadata: null,
+          metadataVersion: session.metadataVersion,
+          agentState: null,
+          agentStateVersion: 0
+        });
+      }
+    }
+
+    console.log(`🖥️ HappyClient: decryptSessions completed - processed ${decryptedSessions.length} sessions`);
+    return decryptedSessions;
+  }
+
+  /**
+   * @param {string} sessionId
+   * @returns {Uint8Array | null}
+   */
+  getSessionDataKey(sessionId) {
+    return this.sessionDataKeys.get(sessionId) || null;
+  }
+
+  /**
+   * @param {string} encryptedBase64
+   * @param {Uint8Array | null} key
+   * @param {Uint8Array} masterSecret
+   * @returns {any | null}
+   */
+  #decryptSessionData(encryptedBase64, key, masterSecret) {
+    if (!encryptedBase64) {
+      return null;
+    }
+    try {
+      const encrypted = new Uint8Array(Buffer.from(encryptedBase64, 'base64'));
+      if (key) {
+        return this.#decryptWithDataKey(encrypted, key);
+      }
+      return this.#decryptLegacy(encrypted, masterSecret);
+    } catch (error) {
+      console.error('Failed to decrypt session data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * AES-256-GCM payload:
+   * version(1) + nonce(12) + ciphertext + tag(16)
+   * @param {Uint8Array} bundle
+   * @param {Uint8Array} dataKey
+   * @returns {any | null}
+   */
+  #decryptWithDataKey(bundle, dataKey) {
+    try {
+      if (bundle.length < 1 + 12 + 16) {
+        return null;
+      }
+      if (bundle[0] !== 0) {
+        return null;
+      }
+
+      const nonce = bundle.slice(1, 13);
+      const authTag = bundle.slice(bundle.length - 16);
+      const ciphertext = bundle.slice(13, bundle.length - 16);
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        Buffer.from(dataKey),
+        Buffer.from(nonce)
+      );
+      decipher.setAuthTag(Buffer.from(authTag));
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(ciphertext)),
+        decipher.final(),
+      ]);
+      return JSON.parse(decrypted.toString('utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Legacy secretbox JSON payload:
+   * nonce(24) + ciphertext
+   * @param {Uint8Array} data
+   * @param {Uint8Array} masterSecret
+   * @returns {any | null}
+   */
+  #decryptLegacy(data, masterSecret) {
+    try {
+      const nacl = require('tweetnacl');
+      const nonceLen = nacl.secretbox.nonceLength;
+      if (data.length < nonceLen + nacl.secretbox.overheadLength) {
+        return null;
+      }
+
+      const nonce = data.slice(0, nonceLen);
+      const encrypted = data.slice(nonceLen);
+      const secret = masterSecret || new Uint8Array(32);
+      const decrypted = nacl.secretbox.open(encrypted, nonce, secret);
+      if (!decrypted) {
+        return null;
+      }
+      return JSON.parse(new TextDecoder().decode(decrypted));
+    } catch {
+      return null;
+    }
   }
 }
 

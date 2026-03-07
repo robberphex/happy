@@ -22,7 +22,7 @@ function formatArg(arg) {
     return arg.stack ?? arg.message
   }
   if (typeof arg === "object" && arg !== null) {
-    return Bun.inspect(arg)
+    return JSON.stringify(arg)
   }
   return String(arg)
 }
