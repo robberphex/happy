@@ -71,6 +71,25 @@ class HappyWebSocket {
         return this.#socket?.connected ?? false;
     }
 
+    /**
+     * @param {string} sessionId
+     * @param {string} encryptedMessage
+     * @param {string | null} [localId]
+     * @returns {boolean}
+     */
+    sendMessage(sessionId, encryptedMessage, localId = null) {
+        if (!this.#socket) {
+            return false;
+        }
+
+        this.#socket.emit('message', {
+            sid: sessionId,
+            message: encryptedMessage,
+            localId: typeof localId === 'string' ? localId : null,
+        });
+        return true;
+    }
+
     #handleUpdate(data) {
         try {
             const body = data?.body;

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { randomBytes, createDecipheriv } from 'crypto';
+import { randomBytes, createCipheriv, createDecipheriv } from 'crypto';
 import nacl from 'tweetnacl';
 
 class HappyClient {
@@ -469,6 +469,21 @@ class HappyClient {
   }
 
   /**
+   * @param {string} sessionId
+   * @param {{ masterSecret: Uint8Array }} encryption
+   * @param {unknown} payload
+   * @returns {string}
+   */
+  encryptSessionMessage(sessionId, encryption, payload) {
+    const sessionDataKey = this.getSessionDataKey(sessionId);
+    const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+    const encrypted = sessionDataKey
+      ? this.#encryptWithDataKey(plaintext, sessionDataKey)
+      : this.#encryptLegacy(plaintext, encryption.masterSecret);
+    return this.encodeBase64(encrypted);
+  }
+
+  /**
    * @param {string} encryptedBase64
    * @param {Uint8Array | null} key
    * @param {Uint8Array} masterSecret
@@ -551,6 +566,46 @@ class HappyClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * AES-256-GCM payload:
+   * version(1) + nonce(12) + ciphertext + tag(16)
+   * @param {Uint8Array} plaintext
+   * @param {Uint8Array} dataKey
+   * @returns {Uint8Array}
+   */
+  #encryptWithDataKey(plaintext, dataKey) {
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', Buffer.from(dataKey), nonce);
+    const encrypted = Buffer.concat([
+      cipher.update(Buffer.from(plaintext)),
+      cipher.final(),
+    ]);
+    const authTag = cipher.getAuthTag();
+
+    const bundle = new Uint8Array(1 + 12 + encrypted.length + 16);
+    bundle[0] = 0;
+    bundle.set(nonce, 1);
+    bundle.set(new Uint8Array(encrypted), 13);
+    bundle.set(new Uint8Array(authTag), 13 + encrypted.length);
+    return bundle;
+  }
+
+  /**
+   * Legacy secretbox JSON payload:
+   * nonce(24) + ciphertext
+   * @param {Uint8Array} plaintext
+   * @param {Uint8Array} masterSecret
+   * @returns {Uint8Array}
+   */
+  #encryptLegacy(plaintext, masterSecret) {
+    const nonce = randomBytes(nacl.secretbox.nonceLength);
+    const encrypted = nacl.secretbox(plaintext, nonce, masterSecret);
+    const result = new Uint8Array(nonce.length + encrypted.length);
+    result.set(nonce, 0);
+    result.set(encrypted, nonce.length);
+    return result;
   }
 }
 

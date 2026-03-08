@@ -79,15 +79,23 @@ export class Orchestrator {
       }
 
       console.log('Lark callback body:', JSON.stringify(body, null, 2));
+
+      if (eventType === 'card.action.trigger') {
+        const action = this.#parseCardActionEvent(body?.event);
+        if (action) {
+          await this.handleCardAction(action);
+        }
+      }
+
       return { ok: true };
     });
     app.post('/callback/happy-lark/lark/event', async (request, reply) => {
-      console.debug(JSON.stringify(request.body));
+      console.debug("event callback:", JSON.stringify(request.body));
       const { header, challenge } = request.body
       const eventType = header?.event_type
       const event = header?.event_type?.startsWith('application.') ? request.body.event : request.body
 
-      console.log(eventType);
+      console.log("eventType is", eventType);
       if (eventType === 'url_verification') {
         return { challenge }
       }
@@ -128,6 +136,13 @@ export class Orchestrator {
 
         await this.handleMessage(parsedMessage)
 
+        return { ok: true };
+      } else if (eventType === 'card.action.trigger') {
+        const actionEvent = event?.event ?? event;
+        const action = this.#parseCardActionEvent(actionEvent);
+        if (action) {
+          await this.handleCardAction(action);
+        }
         return { ok: true };
       }
 
@@ -197,10 +212,7 @@ export class Orchestrator {
     const base64PubKey = this.#extractTerminalPublicKey(message.text);
     console.log("base64PubKey", base64PubKey);
     if (!base64PubKey) {
-      await this.#larkClient.replyMarkdownCard(
-        message.messageId,
-        '未识别到终端认证链接，请发送 `happy://terminal?...`'
-      );
+      await this.#forwardMessageToSession(message);
       return;
     }
 
@@ -263,6 +275,218 @@ export class Orchestrator {
       console.log("error_error", error);
       const errMsg = error instanceof Error ? error.message : String(error);
       await this.#larkClient.replyText(message.messageId, `终端授权失败: ${errMsg}`);
+    }
+  }
+
+  /**
+   * @param {ParsedMessage} message
+   * @returns {Promise<void>}
+   */
+  async #forwardMessageToSession(message) {
+    const auth = await this.#authCacheService.get(message.senderId);
+    if (!auth) {
+      await this.#larkClient.replyText(message.messageId, '请先发送终端认证链接（happy://terminal?...）');
+      return;
+    }
+
+    try {
+      const { secret, token } = auth;
+      const encryption = await HappyEncryption.create(secret);
+
+      const sessions = await this.#happyClient.fetchSessions(token, encryption);
+      const selectedSessionId = this.#resolveCurrentSessionId(auth.currentSessionId, sessions);
+      if (!selectedSessionId) {
+        await this.#larkClient.replyText(message.messageId, '当前没有可用 Session，请先发送 /sessions 选择会话');
+        return;
+      }
+
+      if (selectedSessionId !== auth.currentSessionId) {
+        await this.#authCacheService.setCurrentSessionId(message.senderId, selectedSessionId);
+      }
+
+      const websocket = await this.#ensureSenderConnection(message.senderId, token, encryption);
+      if (!websocket) {
+        await this.#larkClient.replyText(message.messageId, '会话连接不可用，请稍后重试');
+        return;
+      }
+
+      const payload = {
+        role: 'user',
+        content: {
+          type: 'text',
+          text: message.text,
+        },
+        meta: {
+          sentFrom: 'happy-lark',
+          lark: {
+            chatId: message.chatId,
+            chatType: message.chatType,
+            messageId: message.messageId,
+            senderId: message.senderId,
+            rootId: message.rootId ?? null,
+          }
+        }
+      };
+      const encryptedMessage = this.#happyClient.encryptSessionMessage(selectedSessionId, encryption, payload);
+      const localId = `lark-${message.messageId}`;
+      const sent = websocket.sendMessage(selectedSessionId, encryptedMessage, localId);
+      if (!sent) {
+        await this.#larkClient.replyText(message.messageId, '消息发送失败：连接未就绪');
+        return;
+      }
+
+      await this.#larkClient.replyText(message.messageId, `已发送到 Session: ${selectedSessionId}`);
+    } catch (error) {
+      console.error("forwardMessageToSession error:", error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      await this.#larkClient.replyText(message.messageId, `消息转发失败: ${errMsg}`);
+    }
+  }
+
+  /**
+   * @param {string | undefined} currentSessionId
+   * @param {Array<{ id: string; active?: boolean; activeAt?: number; updatedAt?: number }>} sessions
+   * @returns {string | null}
+   */
+  #resolveCurrentSessionId(currentSessionId, sessions) {
+    if (currentSessionId && sessions.some((s) => s.id === currentSessionId)) {
+      return currentSessionId;
+    }
+
+    const active = sessions
+      .filter((s) => s.active)
+      .sort((a, b) => (b.activeAt || 0) - (a.activeAt || 0))[0];
+    if (active?.id) {
+      return active.id;
+    }
+
+    const latest = sessions
+      .slice()
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+    return latest?.id ?? null;
+  }
+
+  /**
+   * @param {string} senderId
+   * @param {string} token
+   * @param {any} encryption
+   * @returns {Promise<HappyWebSocket | null>}
+   */
+  async #ensureSenderConnection(senderId, token, encryption) {
+    const existing = this.#webSocketMap.get(senderId);
+    if (existing?.websocket?.isConnected()) {
+      return existing.websocket;
+    }
+
+    if (existing?.websocket) {
+      existing.websocket.disconnect();
+    }
+
+    await this.#happyClient.fetchActiveSessions(token, encryption);
+    const websocket = new HappyWebSocket();
+    websocket.connect(token, encryption, {
+      getSessionDataKey: (sessionId) => this.#happyClient.getSessionDataKey(sessionId),
+    });
+    this.#webSocketMap.set(senderId, { websocket, encryption });
+    return websocket;
+  }
+
+  /**
+   * @param {{
+   *   openId: string;
+   *   openMessageId: string;
+   *   openChatId: string;
+   *   action: string;
+   *   sessionId?: string;
+   * }} cardAction
+   * @returns {Promise<void>}
+   */
+  async handleCardAction(cardAction) {
+    if (cardAction.action !== "session_select") {
+      return;
+    }
+
+    if (!cardAction.openId) {
+      await this.#replyCardActionFeedback(cardAction, "无法识别用户身份，切换 Session 失败");
+      return;
+    }
+
+    if (!cardAction.sessionId) {
+      await this.#replyCardActionFeedback(cardAction, "未提供 Session ID，无法切换");
+      return;
+    }
+
+    const auth = await this.#authCacheService.get(cardAction.openId);
+    if (!auth) {
+      await this.#replyCardActionFeedback(cardAction, "请先完成终端认证，再切换 Session");
+      return;
+    }
+
+    try {
+      const { secret, token } = auth;
+      const encryption = await HappyEncryption.create(secret);
+      const sessions = await this.#happyClient.fetchSessions(token, encryption);
+      const selected = sessions.find((s) => s.id === cardAction.sessionId);
+
+      if (!selected) {
+        await this.#replyCardActionFeedback(cardAction, `Session 不存在或已失效: ${cardAction.sessionId}`);
+        return;
+      }
+
+      await this.#authCacheService.setCurrentSessionId(cardAction.openId, cardAction.sessionId);
+
+      const metadata = selected.metadata || {};
+      const summary = metadata.path || metadata.host || selected.id;
+      await this.#replyCardActionFeedback(cardAction, `已切换当前 Session: ${summary} (${selected.id})`);
+    } catch (error) {
+      console.error("handleCardAction error:", error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      await this.#replyCardActionFeedback(cardAction, `切换 Session 失败: ${errMsg}`);
+    }
+  }
+
+  /**
+   * @param {unknown} rawEvent
+   * @returns {{
+   *   openId: string;
+   *   openMessageId: string;
+   *   openChatId: string;
+   *   action: string;
+   *   sessionId?: string;
+   * } | null}
+   */
+  #parseCardActionEvent(rawEvent) {
+    if (!rawEvent || typeof rawEvent !== "object") {
+      return null;
+    }
+
+    const event = /** @type {any} */ (rawEvent);
+    const value = event.action?.value;
+    if (!value || typeof value.action !== "string") {
+      return null;
+    }
+
+    return {
+      openId: event.operator?.open_id ?? "",
+      openMessageId: event.context?.open_message_id ?? "",
+      openChatId: event.context?.open_chat_id ?? "",
+      action: value.action,
+      sessionId: value.session_id,
+    };
+  }
+
+  /**
+   * @param {{ openMessageId: string; openChatId: string }} cardAction
+   * @param {string} text
+   */
+  async #replyCardActionFeedback(cardAction, text) {
+    if (cardAction.openMessageId) {
+      await this.#larkClient.replyText(cardAction.openMessageId, text);
+      return;
+    }
+
+    if (cardAction.openChatId) {
+      await this.#larkClient.sendText(cardAction.openChatId, text);
     }
   }
 
