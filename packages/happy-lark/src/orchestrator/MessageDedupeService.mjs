@@ -1,16 +1,14 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { UniqueConstraintError } from "sequelize";
+import { MessageDedupeModel, ensureDatabaseReady } from "../db/sequelize.mjs";
 
 export class MessageDedupeService {
   async tryInsert(messageId) {
     try {
-      await prisma.messageDedupe.create({
-        data: { messageId },
-      });
+      await ensureDatabaseReady();
+      await MessageDedupeModel.create({ messageId });
       return true;
     } catch (error) {
-      if (error.code === 'P2002') {
+      if (error instanceof UniqueConstraintError) {
         console.warn(`Duplicate messageId received: ${messageId}`);
         return false;
       }

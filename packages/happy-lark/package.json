@@ -11,8 +11,10 @@
     "test": "node --test test/**/*.test.js",
     "start": "fastify start -l info app.mjs",
     "dev": "fastify start -w -l info -P app.mjs",
-    "migrate": "dotenv -e .env.dev -- prisma migrate --name init",
-    "migrate:reset": "dotenv -e .env.dev -- prisma migrate reset"
+    "db:sync": "node src/db/sync.mjs",
+    "db:migrate": "sequelize-cli db:migrate",
+    "db:migrate:undo": "sequelize-cli db:migrate:undo",
+    "db:migration:generate": "sequelize-cli migration:generate --migrations-path migrations"
   },
   "keywords": [],
   "author": "",
@@ -23,8 +25,6 @@
     "@fastify/sensible": "^6.0.0",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@loglayer/transport-simple-pretty-terminal": "^3.0.2",
-    "@prisma/adapter-mariadb": "^7.4.2",
-    "@prisma/client": "^6.19.2",
     "axios": "^1.13.6",
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
@@ -32,17 +32,19 @@
     "fastify-cli": "^7.4.1",
     "fastify-plugin": "^5.0.0",
     "loglayer": "^9.1.0",
-    "prisma": "^6.19.2",
-    "prisma-json-types-generator": "^3.6.2",
+    "mysql2": "^3.15.1",
+    "sequelize": "^6.37.8",
     "serialize-error": "^13.0.1",
     "socket.io-client": "^4.8.3",
+    "sqlite3": "^5.1.7",
     "tweetnacl": "^1.0.3",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
     "c8": "^10.1.2",
-    "dotenv-cli": "^8.0.0"
+    "dotenv-cli": "^8.0.0",
+    "sequelize-cli": "^6.6.5"
   },
   "bin": {
     "happy-lark": "bin/happy-lark.mjs"

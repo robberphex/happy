@@ -82,7 +82,6 @@ class HappyWebSocket {
             if (body.t === 'new-message') {
                 this.#logDecryptedMessage(body);
             } else {
-
                 console.log('🔌 HappyWebSocket: ===== Received update =====');
                 console.log('🔌 HappyWebSocket: Type:', body.t);
                 console.log('🔌 HappyWebSocket: Full payload:', JSON.stringify(body, null, 2));

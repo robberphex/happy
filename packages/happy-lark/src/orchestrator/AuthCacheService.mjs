@@ -1,6 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { AuthCacheModel, ensureDatabaseReady } from "../db/sequelize.mjs";
 
 export class AuthCacheService {
   /**
@@ -8,14 +6,13 @@ export class AuthCacheService {
    * @returns {{ secret: Uint8Array; token: string } | null}
    */
   async get(senderId) {
-    const authCache = await prisma.authCache.findUnique({
-      where: { senderId },
-    });
+    await ensureDatabaseReady();
+    const authCache = await AuthCacheModel.findByPk(senderId);
     if (!authCache) {
       return null;
     }
     return {
-      secret: Uint8Array.from(atob(authCache.secret), (c) => c.charCodeAt(0)),
+      secret: new Uint8Array(Buffer.from(authCache.secret, "base64")),
       token: authCache.token,
     };
   }
@@ -24,10 +21,11 @@ export class AuthCacheService {
    * @returns {Promise<Array<{ senderId: string; secret: Uint8Array; token: string }>>}
    */
   async getAll() {
-    const authCaches = await prisma.authCache.findMany();
+    await ensureDatabaseReady();
+    const authCaches = await AuthCacheModel.findAll();
     return authCaches.map((authCache) => ({
       senderId: authCache.senderId,
-      secret: Uint8Array.from(atob(authCache.secret), (c) => c.charCodeAt(0)),
+      secret: new Uint8Array(Buffer.from(authCache.secret, "base64")),
       token: authCache.token,
     }));
   }
@@ -37,17 +35,11 @@ export class AuthCacheService {
    * @param {{ secret: Uint8Array; token: string }} authData
    */
   async set(senderId, authData) {
-    await prisma.authCache.upsert({
-      where: { senderId },
-      update: {
-        secret: Buffer.from(authData.secret).toString("base64"),
-        token: authData.token,
-      },
-      create: {
-        senderId,
-        secret: Buffer.from(authData.secret).toString("base64"),
-        token: authData.token,
-      },
+    await ensureDatabaseReady();
+    await AuthCacheModel.upsert({
+      senderId,
+      secret: Buffer.from(authData.secret).toString("base64"),
+      token: authData.token,
     });
   }
 }
