@@ -3,7 +3,7 @@ import { AuthCacheModel, ensureDatabaseReady } from "../db/sequelize.mjs";
 export class AuthCacheService {
   /**
    * @param {string} senderId
-   * @returns {{ secret: Uint8Array; token: string } | null}
+   * @returns {{ secret: Uint8Array; token: string; currentSessionId?: string } | null}
    */
   async get(senderId) {
     await ensureDatabaseReady();
@@ -14,11 +14,12 @@ export class AuthCacheService {
     return {
       secret: new Uint8Array(Buffer.from(authCache.secret, "base64")),
       token: authCache.token,
+      currentSessionId: authCache.currentSessionId ?? undefined,
     };
   }
 
   /**
-   * @returns {Promise<Array<{ senderId: string; secret: Uint8Array; token: string }>>}
+   * @returns {Promise<Array<{ senderId: string; secret: Uint8Array; token: string; currentSessionId?: string }>>}
    */
   async getAll() {
     await ensureDatabaseReady();
@@ -27,12 +28,13 @@ export class AuthCacheService {
       senderId: authCache.senderId,
       secret: new Uint8Array(Buffer.from(authCache.secret, "base64")),
       token: authCache.token,
+      currentSessionId: authCache.currentSessionId ?? undefined,
     }));
   }
 
   /**
    * @param {string} senderId
-   * @param {{ secret: Uint8Array; token: string }} authData
+   * @param {{ secret: Uint8Array; token: string; currentSessionId?: string }} authData
    */
   async set(senderId, authData) {
     await ensureDatabaseReady();
@@ -40,6 +42,19 @@ export class AuthCacheService {
       senderId,
       secret: Buffer.from(authData.secret).toString("base64"),
       token: authData.token,
+      currentSessionId: authData.currentSessionId ?? null,
     });
+  }
+
+  /**
+   * @param {string} senderId
+   * @param {string | null | undefined} currentSessionId
+   */
+  async setCurrentSessionId(senderId, currentSessionId) {
+    await ensureDatabaseReady();
+    await AuthCacheModel.update(
+      { currentSessionId: currentSessionId ?? null },
+      { where: { senderId } },
+    );
   }
 }

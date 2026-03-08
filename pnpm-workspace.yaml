@@ -3,5 +3,6 @@ packages:
 
 patchedDependencies:
   pglite-prisma-adapter@0.7.2: patches/pglite-prisma-adapter@0.7.2.patch
+  sequelize-cli@6.6.5: patches/sequelize-cli@6.6.5.patch
 
 injectWorkspacePackages: true

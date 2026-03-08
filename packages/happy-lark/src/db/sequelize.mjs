@@ -1,6 +1,6 @@
 import { DataTypes, Sequelize } from "sequelize";
-import defineAuthCacheModel from "../modles/AuthCacheModel.mjs";
-import defineMessageDedupeModel from "../modles/MessageDedupeModel.mjs";
+import defineAuthCacheModel from "../models/AuthCacheModel.mjs";
+import defineMessageDedupeModel from "../models/MessageDedupeModel.mjs";
 
 const sequelize = new Sequelize(process.env.DATABASE_URL);
 

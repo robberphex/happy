@@ -9,6 +9,9 @@ patchedDependencies:
   pglite-prisma-adapter@0.7.2:
     hash: 80219ed5db289cd22764863d1fb23b79e36276574bca3b568047b46b0398ba23
     path: patches/pglite-prisma-adapter@0.7.2.patch
+  sequelize-cli@6.6.5:
+    hash: ae6efbe07b6e3b09a4ce30a656559f321ab0b100130c217e78cd58c55ba21451
+    path: patches/sequelize-cli@6.6.5.patch
 
 importers:
 
@@ -718,7 +721,7 @@ importers:
         version: 8.0.0
       sequelize-cli:
         specifier: ^6.6.5
-        version: 6.6.5
+        version: 6.6.5(patch_hash=ae6efbe07b6e3b09a4ce30a656559f321ab0b100130c217e78cd58c55ba21451)
 
   packages/happy-server:
     dependencies:
@@ -19867,7 +19870,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  sequelize-cli@6.6.5:
+  sequelize-cli@6.6.5(patch_hash=ae6efbe07b6e3b09a4ce30a656559f321ab0b100130c217e78cd58c55ba21451):
     dependencies:
       fs-extra: 9.1.0
       js-beautify: 1.15.4

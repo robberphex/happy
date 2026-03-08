@@ -17,6 +17,11 @@ export default function defineAuthCacheModel(sequelize, DataTypes) {
         allowNull: false,
         field: "token",
       },
+      currentSessionId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        field: "current_session_id",
+      },
     },
     {
       tableName: "auth_cache",

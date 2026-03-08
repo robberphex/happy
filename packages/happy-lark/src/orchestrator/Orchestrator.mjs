@@ -292,7 +292,7 @@ export class Orchestrator {
 
   /**
    * @param {ParsedMessage} message
-   * @param {{ secret: Uint8Array; token: string } | null} auth
+   * @param {{ secret: Uint8Array; token: string; currentSessionId?: string } | null} auth
    * @returns {Promise<void>}
    */
   async #handleSessionsCommand(message, auth) {
@@ -307,8 +307,17 @@ export class Orchestrator {
 
       const sessions = await this.#happyClient.fetchSessions(token, encryption);
       console.log('fetchSessions result:', JSON.stringify(sessions, null, 2));
-      const sessions2a = await this.#happyClient.fetchActiveSessions(token, encryption);
-      console.log('fetchActiveSessions result:', JSON.stringify(sessions2a, null, 2));
+      const activeSessions = await this.#happyClient.fetchActiveSessions(token, encryption);
+      console.log('fetchActiveSessions result:', JSON.stringify(activeSessions, null, 2));
+
+      const currentActiveSession = activeSessions
+        .slice()
+        .sort((a, b) => (b.activeAt || 0) - (a.activeAt || 0))[0];
+      const currentSessionId = currentActiveSession?.id ?? auth.currentSessionId;
+
+      if (currentSessionId !== auth.currentSessionId) {
+        await this.#authCacheService.setCurrentSessionId(message.senderId, currentSessionId);
+      }
 
       if (sessions.length === 0) {
         await this.#larkClient.replyText(message.messageId, '暂无 Session');
@@ -334,6 +343,7 @@ export class Orchestrator {
 
       const card = buildSessionListCard({
         sessions: cardSessions,
+        currentSessionId,
         title: `Session 列表 (${sessions.length})`,
         descriptions,
       });
@@ -347,7 +357,7 @@ export class Orchestrator {
 
   /**
    * @param {ParsedMessage} message
-   * @param {{ secret: Uint8Array; token: string } | null} auth
+   * @param {{ secret: Uint8Array; token: string; currentSessionId?: string } | null} auth
    * @returns {Promise<void>}
    */
   async #handleMachinesCommand(message, auth) {
