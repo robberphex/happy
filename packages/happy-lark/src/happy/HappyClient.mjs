@@ -4,7 +4,7 @@ import nacl from 'tweetnacl';
 
 class HappyClient {
   constructor() {
-    this.serverUrl = process.env.HAPPY_SERVER_URL || 'https://api.cluster-fluster.com';
+    this.serverUrl = process.env.HAPPY_SERVER_URL || 'http://127.0.0.1:3005';
     /** @type {Map<string, Uint8Array>} */
     this.machineDataKeys = new Map();
     /** @type {Map<string, Uint8Array>} */

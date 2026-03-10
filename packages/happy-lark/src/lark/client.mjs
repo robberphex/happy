@@ -128,6 +128,26 @@ export class LarkClient {
     }
   }
 
+  async sendCardEntity(chatId, cardId) {
+    try {
+      this.#logger.withMetadata({ chatId, cardId }).debug("Sending card entity")
+      const card = { type: "card", data: { card_id: cardId } };
+      const resp = await this.#sdk.im.message.create({
+        data: {
+          receive_id: chatId,
+          content: JSON.stringify(card),
+          msg_type: "interactive",
+        },
+        params: { receive_id_type: "chat_id" },
+      })
+      this.#logger.withMetadata({ chatId, cardId, response: resp.data }).debug("Card entity sent")
+      return resp.data?.message_id
+    } catch (error) {
+      this.#logger.withError(error).error("Failed to send card entity")
+      return undefined
+    }
+  }
+
   async replyCard(messageId, card) {
     try {
       this.#logger.withMetadata({ messageId }).debug("Replying card")
@@ -260,10 +280,12 @@ export class LarkClient {
 
   async streamCardText(cardId, elementId, content, sequence) {
     try {
+      this.#logger.debug({ cardId, elementId, contentLength: content?.length, sequence }, "Streaming card text")
       await this.#sdk.cardkit.v1.cardElement.content({
         path: { card_id: cardId, element_id: elementId },
         data: { content, sequence },
       })
+      this.#logger.debug({ cardId, elementId, sequence }, "Card text streamed successfully")
     } catch (error) {
       this.#logger.withError(error).error("Failed to stream card text")
     }

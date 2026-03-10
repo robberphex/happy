@@ -8,6 +8,7 @@ class HappyWebSocket {
     #token = null;
     #encryption = null;
     #getSessionDataKey = null;
+    #onAgentMessage = null;
 
     connect(token, encryption, options = {}) {
         if (this.#socket) {
@@ -18,6 +19,7 @@ class HappyWebSocket {
         this.#token = token;
         this.#encryption = encryption;
         this.#getSessionDataKey = options.getSessionDataKey || null;
+        this.#onAgentMessage = options.onAgentMessage || null;
 
         console.log('🔌 HappyWebSocket: Connecting to', this.#serverUrl);
 
@@ -126,13 +128,27 @@ class HappyWebSocket {
                 return;
             }
 
-            console.log('🔓 HappyWebSocket: Decrypted new-message:', JSON.stringify({
+            const messageData = {
                 sessionId,
                 messageId: body?.message?.id,
                 localId: body?.message?.localId,
                 createdAt: body?.message?.createdAt,
                 content: decrypted
-            }, null, 2));
+            };
+
+            console.log('🔓 HappyWebSocket: Decrypted new-message:', JSON.stringify(messageData, null, 2));
+
+            if (this.#onAgentMessage && decrypted?.role === 'session' && decrypted?.content?.ev) {
+                this.#onAgentMessage({
+                    sessionId,
+                    messageId: body?.message?.id,
+                    localId: body?.message?.localId,
+                    createdAt: body?.message?.createdAt,
+                    turn: decrypted.content.turn,
+                    event: decrypted.content.ev,
+                    meta: decrypted.content.meta,
+                });
+            }
         } catch (error) {
             console.error('🔓 HappyWebSocket: Error decrypting message:', error);
         }

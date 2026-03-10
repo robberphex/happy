@@ -37,7 +37,13 @@ export function buildStreamingCard(initialContent) {
                 {
                   tag: "markdown",
                   content: hasContent ? initialContent : placeholderText,
-                  element_id: "md_0",
+                  text_size: "notation",
+                  element_id: "md_thinking",
+                },
+                {
+                  tag: "markdown",
+                  content: "",
+                  element_id: "md_text",
                 },
                 {
                   tag: "markdown",
