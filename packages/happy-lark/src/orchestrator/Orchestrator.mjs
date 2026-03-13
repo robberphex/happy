@@ -68,7 +68,6 @@ export class Orchestrator {
     await this.#restoreAllWebSocketConnections();
 
     this.#larkClient.onMessage(async (event) => {
-      console.log("1111",event);
       const eventType = event.event?.event_type;
       console.log('Lark event:', eventType, JSON.stringify(event, null, 2));
 
@@ -232,27 +231,7 @@ export class Orchestrator {
             console.log(`🔌 Set default sessionId: ${latestSession.id}`);
           }
         }
-
-        await this.#larkClient.replyText(message.messageId, `WebSocket 连接已建立，正在监听实时消息...`);
       }
-
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      const machines = await this.#happyClient.fetchMachines(token, encryption);
-      console.log(`machines(${machines.length})`);
-      const preview = machines.map((machine) => ({
-        id: machine.id,
-        metadataVersion: machine.metadataVersion,
-        daemonStateVersion: machine.daemonStateVersion,
-        metadataDecrypted: machine.metadata !== null,
-        daemonStateDecrypted: machine.daemonState !== null,
-        name: machine.metadata?.name ?? null,
-        status: machine.daemonState?.status ?? null
-      }));
-      console.table(preview);
-      const mListString = JSON.stringify(machines, null, 2);
-      console.log(JSON.stringify(machines, null, 2));
-      await this.#larkClient.replyMarkdownCard(message.messageId, `机器列表: \n\`\`\`\n${mListString}\n\`\`\``);
     } catch (error) {
       console.log("error_error", error);
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -629,8 +608,6 @@ export class Orchestrator {
       const { secret, token } = auth;
       const encryption = await HappyEncryption.create(secret);
 
-      await this.#larkClient.replyText(message.messageId, '正在获取机器列表...');
-
       const machines = await this.#happyClient.fetchMachines(token, encryption);
       console.log(`machines(${machines.length})`);
 
@@ -877,6 +854,22 @@ export class Orchestrator {
 
       const status = event?.status || 'completed';
       const summaryText = cardData.accumulatedText.slice(0, 100) || '[完成]';
+
+      // 如果没有 thinking 内容，清空 thinking 元素
+      if (!cardData.accumulatedThinking || cardData.accumulatedThinking.length === 0) {
+        const seqThinking = cardData.sequence++;
+        await this.#larkClient.updateCardElement(
+          cardData.cardId,
+          'md_thinking',
+          {
+            tag: 'markdown',
+            content: '',
+            text_size: 'notation',
+            element_id: 'md_thinking',
+          },
+          seqThinking,
+        );
+      }
 
       // 计算耗时并更新 processing_indicator
       const elapsed = this.#formatDuration(Date.now() - (cardData.createdAt || Date.now()));
