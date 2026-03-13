@@ -19,7 +19,3 @@ const hClient = new HappyClient();
 const orch = new Orchestrator(larkClient, hClient);
 
 await orch.startApi();
-
-
-// await larkClient.sendTextByUserOpenId("ou_4749e5cc8e75ed38c97a70af20309727", "test1");
-

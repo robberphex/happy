@@ -5,7 +5,6 @@ import { HappyWebSocket } from "../happy/HappyWebSocket.mjs"
 import { buildSessionListCard, buildStreamingCard, buildStreamingCloseSettings } from "../lark/cards/index.mjs"
 import { AuthCacheService } from "./AuthCacheService.mjs"
 import { MessageDedupeService } from "./MessageDedupeService.mjs"
-import fastify from "fastify";
 import { text } from "node:stream/consumers"
 
 /**
@@ -64,65 +63,21 @@ export class Orchestrator {
    */
   async startApi() {
 
-    // Configure
     console.log('Starting API...');
 
-    // Restore all WebSocket connections from cache
     await this.#restoreAllWebSocketConnections();
 
-    // Start API
-    const app = fastify({
-      // loggerInstance: logger,
-      bodyLimit: 1024 * 1024 * 100, // 100MB
-    });
-    app.register(import('@fastify/cors'), {
-      origin: '*',
-      allowedHeaders: '*',
-      methods: ['GET', 'POST', 'DELETE']
-    });
-    app.get('/', function (request, reply) {
-      reply.send('Welcome to Happy Lark!');
-    });
-    app.post('/callback/happy-lark/lark/callback', async (request, reply) => {
-      const body = request.body || {};
-      const eventType = body?.header?.event_type || body?.type;
+    this.#larkClient.onMessage(async (event) => {
+      console.log("1111",event);
+      const eventType = event.event?.event_type;
+      console.log('Lark event:', eventType, JSON.stringify(event, null, 2));
 
-      if (eventType === 'url_verification') {
-        return { challenge: body?.challenge };
-      }
-
-      console.log('Lark callback body:', JSON.stringify(body, null, 2));
-
-      if (eventType === 'card.action.trigger') {
-        const action = this.#parseCardActionEvent(body?.event);
-        if (action) {
-          await this.handleCardAction(action);
-        }
-      }
-
-      return { ok: true };
-    });
-    app.post('/callback/happy-lark/lark/event', async (request, reply) => {
-      console.debug("event callback:", JSON.stringify(request.body));
-      const { header, challenge } = request.body
-      const eventType = header?.event_type
-      const event = header?.event_type?.startsWith('application.') ? request.body.event : request.body
-
-      console.log("eventType is", eventType);
-      if (eventType === 'url_verification') {
-        return { challenge }
-      }
-
-      if (eventType === 'application.bot.menu_v6') {
-        const { event_key, operator, timestamp } = event
-        console.log(`Bot menu clicked: event_key=${event_key}, operator=${operator?.operator_id?.open_id}, timestamp=${timestamp}`)
-        return { ok: true };
-      } else if (eventType === 'im.message.receive_v1') {
-        const message = event?.event?.message ?? event?.message
-        const sender = event?.event?.sender ?? event?.sender
+      if (eventType === 'im.message.receive_v1') {
+        const message = event.event?.message ?? event.event
+        const sender = event.event?.sender ?? event.event?.sender
 
         if (!message || message.message_type !== "text") {
-          return { ok: true }
+          return
         }
 
         let contentText = ""
@@ -130,11 +85,11 @@ export class Orchestrator {
           const parsedContent = JSON.parse(message.content)
           contentText = parsedContent?.text ?? ""
         } catch {
-          return { ok: true }
+          return
         }
 
         if (!contentText.trim()) {
-          return { ok: true }
+          return
         }
 
         /** @type {ParsedMessage} */
@@ -148,23 +103,19 @@ export class Orchestrator {
         }
 
         await this.handleMessage(parsedMessage)
-
-        return { ok: true };
-      } else if (eventType === 'card.action.trigger') {
-        const actionEvent = event?.event ?? event;
-        const action = this.#parseCardActionEvent(actionEvent);
-        if (action) {
-          await this.handleCardAction(action);
-        }
-        return { ok: true };
       }
+    })
 
-      const bytes = await this.#happyClient.getRandomBytesAsync(32);
+    this.#larkClient.onCardAction(async (event) => {
+      const action = this.#parseCardActionEvent(event.event)
+      if (action) {
+        await this.handleCardAction(action)
+      }
+    })
 
-      return { ok: true, bytes: Buffer.from(bytes).toString('base64') }
-    });
+    await this.#larkClient.startCallback()
 
-    await app.listen({ port: 3000, host: '0.0.0.0' });
+    console.log('Happy Lark is running with WebSocket callback...')
   }
 
   /**
@@ -772,7 +723,21 @@ export class Orchestrator {
       }
 
       if (!messageId) {
-        console.error('Failed to send streaming card');
+        console.error('Failed to send streaming card', { cardId, chatId, userMessageId, sessionId, turnId });
+        // 即使发送失败，也存储cardData以便后续更新
+        const cardData = {
+          cardId,
+          messageId: null,
+          accumulatedText: '',
+          turnId,
+          chatId,
+          sequence: 1,
+          createdAt: Date.now(),
+        };
+        this.#streamingCards.set(cardKey, cardData);
+        this.#streamingCards.set(senderCardKey, cardData);
+        this.#streamingCards.set(sessionId, cardData);
+        console.log(`💬 Stored failed card data for later recovery: cardId=${cardId}`);
         return;
       }
 

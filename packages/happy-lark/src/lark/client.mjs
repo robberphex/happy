@@ -7,7 +7,14 @@ import { createLarkLogger, getLarkLoggerLevel } from "./logger.mjs"
  * @property {string} appId
  * @property {string} appSecret
  * @property {string} [domain]
+ * @property {string} [encryptKey]
  * @property {string} [docToken]
+ */
+
+/**
+ * @typedef {Object} LarkCallbackEvent
+ * @property {string} header
+ * @property {any} event
  */
 
 export class LarkClient {
@@ -17,6 +24,14 @@ export class LarkClient {
   #logger
   /** @type {lark.Client} */
   #sdk
+  /** @type {lark.EventDispatcher} */
+  #eventDispatcher
+  /** @type {lark.WSClient} */
+  #wsClient
+  /** @type {((event: LarkCallbackEvent) => void) | null} */
+  #messageHandler
+  /** @type {((event: LarkCallbackEvent) => void) | null} */
+  #cardActionHandler
 
   /**
    * @param {LarkConfig} config
@@ -44,6 +59,89 @@ export class LarkClient {
       logger: createLarkLogger("lark-sdk"),
       loggerLevel: getLarkLoggerLevel(),
     })
+
+    if (config.encryptKey) {
+      this.#eventDispatcher = new lark.EventDispatcher({
+        encryptKey: config.encryptKey,
+      })
+    }
+  }
+
+  /**
+   * @param {(event: LarkCallbackEvent) => void} handler
+   */
+  onMessage(handler) {
+    this.#messageHandler = handler
+    this.#registerEventHandlers()
+  }
+
+  /**
+   * @param {(event: LarkCallbackEvent) => void} handler
+   */
+  onCardAction(handler) {
+    this.#cardActionHandler = handler
+    this.#registerEventHandlers()
+  }
+
+  #registerEventHandlers() {
+    if (!this.#eventDispatcher) {
+      this.#logger.warn("EventDispatcher not initialized, encryptKey may be missing")
+      return
+    }
+
+    this.#eventDispatcher.register({
+      'im.message.receive_v1': async (data) => {
+        if (this.#messageHandler) {
+          this.#messageHandler({
+            header: data.header || {},
+            event: data.event || data,
+          })
+        }
+      },
+      'card.action.trigger': async (data) => {
+        if (this.#cardActionHandler) {
+          this.#cardActionHandler({
+            header: data.header || {},
+            event: data.event || data,
+          })
+        }
+      },
+      'url_verification': async (data) => {
+        return { challenge: data.challenge }
+      },
+      'application.bot.menu_v6': async (data) => {
+        return { ok: true }
+      },
+    })
+  }
+
+  async startCallback() {
+    if (!this.#config.encryptKey) {
+      throw new Error("encryptKey is required for WebSocket callback")
+    }
+
+    if (!this.#eventDispatcher) {
+      this.#eventDispatcher = new lark.EventDispatcher({
+        encryptKey: this.#config.encryptKey,
+      })
+      this.#registerEventHandlers()
+    }
+
+    this.#wsClient = new lark.WSClient({
+      appId: this.#config.appId,
+      appSecret: this.#config.appSecret,
+    })
+
+    this.#wsClient.start({ eventDispatcher: this.#eventDispatcher })
+    this.#logger.info("WebSocket callback started")
+  }
+
+  async stopCallback() {
+    if (this.#wsClient) {
+      this.#wsClient.close({ force: true })
+      this.#wsClient = null
+      this.#logger.info("WebSocket callback stopped")
+    }
   }
 
   async replyText(messageId, text) {
