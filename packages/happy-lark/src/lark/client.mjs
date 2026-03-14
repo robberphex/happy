@@ -378,26 +378,34 @@ export class LarkClient {
 
   async streamCardText(cardId, elementId, content, sequence) {
     try {
-      this.#logger.debug({ cardId, elementId, contentLength: content?.length, sequence }, "Streaming card text")
-      await this.#sdk.cardkit.v1.cardElement.content({
+      console.log("sequence", sequence, cardId);
+      this.#logger.debug({ cardId, elementId, contentLength: content?.length, sequence, content: content?.substring(0, 50) }, "Streaming card text")
+      const resp = await this.#sdk.cardkit.v1.cardElement.content({
         path: { card_id: cardId, element_id: elementId },
         data: { content, sequence },
       })
-      this.#logger.debug({ cardId, elementId, sequence }, "Card text streamed successfully")
+
+      console.log("sequence finished!!!", sequence, cardId);
+      this.#logger.debug({ cardId, elementId, sequence, response: resp?.data }, "Card content streamed successfully")
+      return resp?.data
     } catch (error) {
       this.#logger.withError(error).error("Failed to stream card text")
+      return undefined
     }
   }
 
   async updateCardElement(cardId, elementId, element, sequence) {
     try {
-      await this.#sdk.cardkit.v1.cardElement.update({
+      console.log(sequence, "element", element);
+      const resp = await this.#sdk.cardkit.v1.cardElement.update({
         path: { card_id: cardId, element_id: elementId },
         data: {
           element: JSON.stringify(element),
           sequence,
         },
       })
+      console.log(sequence, "finished!!!!");
+      this.#logger.debug({ cardId, elementId, sequence, response: resp?.data }, "Card element updated successfully")
     } catch (error) {
       this.#logger.withError(error).error("Failed to update card element")
     }

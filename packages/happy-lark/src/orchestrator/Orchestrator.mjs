@@ -217,7 +217,13 @@ export class Orchestrator {
         const activeSessions = await this.#happyClient.fetchActiveSessions(token, encryption);
         const websocket = new HappyWebSocket();
         websocket.connect(token, encryption, {
-          getSessionDataKey: (sessionId) => this.#happyClient.getSessionDataKey(sessionId),
+          getSessionDataKey: (sessionId) => {
+            this.#sessionToSenderMap.set(sessionId, message.senderId);
+            return this.#happyClient.getSessionDataKey(sessionId);
+          },
+          onAgentMessage: (messageData) => {
+            this.#handleAgentMessage(message.senderId, messageData);
+          },
         });
         this.#webSocketMap.set(message.senderId, { websocket, encryption });
 
@@ -309,6 +315,7 @@ export class Orchestrator {
         turnId: null,
         chatId: message.chatId,
         sequence: 1,
+        createdAt: Date.now(),
       });
 
       const encryptedMessage = this.#happyClient.encryptSessionMessage(selectedSessionId, encryption, payload);
@@ -680,6 +687,10 @@ export class Orchestrator {
         existingCardData.turnId = turnId;
         this.#streamingCards.set(cardKey, existingCardData);
         this.#streamingCards.set(senderCardKey, existingCardData);
+        this.#sessionToLatestLarkMap.set(sessionId, {
+          chatId: existingCardData.chatId,
+          messageId: existingCardData.messageId,
+        });
         console.log(`💬 Reused pre-created card: ${existingCardData.cardId} for turn ${turnId}`);
         return;
       }
@@ -805,7 +816,7 @@ export class Orchestrator {
         ? `<font color='grey'>${cardData.accumulatedThinking}</font>`
         : cardData.accumulatedText;
 
-      console.log(`💬 Streaming to card: cardId=${cardData.cardId}, elementId=${elementId}, seq=${cardData.sequence}, thinking=${isThinking}, text=${newText.length} chars`);
+      console.log(`💬 Streaming to card: cardId=${cardData.cardId}, elementId=${elementId}, seq=${cardData.sequence}, thinking=${isThinking}, text="${newText}", accumulatedText="${cardData.accumulatedText}"`);
       const sequence = cardData.sequence++;
       await this.#larkClient.streamCardText(cardData.cardId, elementId, content, sequence);
       console.log(`💬 Streamed text to card: ${newText.length} chars, seq: ${sequence}, accumulated:${cardData.accumulatedText.length} chars`);
@@ -872,6 +883,7 @@ export class Orchestrator {
       }
 
       // 计算耗时并更新 processing_indicator
+      console.log("start time",(cardData.createdAt || Date.now()), Date.now());
       const elapsed = this.#formatDuration(Date.now() - (cardData.createdAt || Date.now()));
       const seq = cardData.sequence++;
       await this.#larkClient.updateCardElement(
