@@ -6,12 +6,12 @@ import { Orchestrator } from "../src/orchestrator/Orchestrator.mjs";
 import { createLogger } from "../src/utils/logger.mjs";
 
 const larkClient = new LarkClient(
-    {
-        appId: process.env.LARK_APP_ID,
-        appSecret: process.env.LARK_APP_SECRET,
-        domain: process.env.LARK_DOMAIN,
-    },
-    createLogger('larkClient'),
+  {
+    appId: process.env.LARK_APP_ID,
+    appSecret: process.env.LARK_APP_SECRET,
+    domain: process.env.LARK_DOMAIN,
+  },
+  createLogger('larkClient'),
 );
 
 const hClient = new HappyClient();
