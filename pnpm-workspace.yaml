@@ -6,3 +6,6 @@ patchedDependencies:
   sequelize-cli@6.6.5: patches/sequelize-cli@6.6.5.patch
 
 injectWorkspacePackages: true
+
+onlyBuiltDependencies:
+  - sqlite3
