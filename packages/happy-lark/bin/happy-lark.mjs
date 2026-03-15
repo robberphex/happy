@@ -10,6 +10,7 @@ const larkClient = new LarkClient(
     appId: process.env.LARK_APP_ID,
     appSecret: process.env.LARK_APP_SECRET,
     domain: process.env.LARK_DOMAIN,
+    encryptKey: process.env.LARK_ENCRYPT_KEY,
   },
   createLogger('larkClient'),
 );

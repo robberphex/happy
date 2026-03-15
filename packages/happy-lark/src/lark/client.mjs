@@ -34,6 +34,18 @@ export class LarkClient {
   #cardActionHandler
 
   /**
+   * 将配置中的 domain 字符串解析为 lark.Domain 枚举或自定义域名
+   * @returns {lark.Domain|string}
+   */
+  #resolveDomain() {
+    if (!this.#config.domain) return lark.Domain.Feishu;
+    const d = this.#config.domain.toLowerCase();
+    if (d === "feishu") return lark.Domain.Feishu;
+    if (d === "lark") return lark.Domain.Lark;
+    return this.#config.domain;
+  }
+
+  /**
    * @param {LarkConfig} config
    * @param {import("../utils/logger").Logger} logger
    */
@@ -41,23 +53,12 @@ export class LarkClient {
     this.#config = config
     this.#logger = logger
 
-    /** @type {lark.Domain|string} */
-    let domain = lark.Domain.Feishu;
-    if (config.domain) {
-      if ("feishu" === config.domain.toLowerCase()) {
-        domain = lark.Domain.Feishu;
-      } else if ("lark" === config.domain.toLowerCase()) {
-        domain = lark.Domain.Lark;
-      } else {
-        domain = config.domain;
-      }
-    }
     this.#sdk = new lark.Client({
       appId: config.appId,
       appSecret: config.appSecret,
-      domain: domain,
+      domain: this.#resolveDomain(),
       logger: createLarkLogger("lark-sdk"),
-      loggerLevel: getLarkLoggerLevel(),
+      loggerLevel: lark.LoggerLevel.trace,
     })
 
     if (config.encryptKey) {
@@ -130,6 +131,11 @@ export class LarkClient {
     this.#wsClient = new lark.WSClient({
       appId: this.#config.appId,
       appSecret: this.#config.appSecret,
+      domain: this.#resolveDomain(),
+      wsConfig: {
+        PingInterval: 30,
+        PingTimeout: 5,
+      },
     })
 
     this.#wsClient.start({ eventDispatcher: this.#eventDispatcher })
